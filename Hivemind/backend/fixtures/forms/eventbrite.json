@@ -1,0 +1,2 @@
+{"rsvp": {"Ticket": "General Admission", "Quantity": "1", "Name": "{name}", "Email": "{email}"},
+ "cancel": {"Email": "{email}", "Action": "Cancel order and release ticket"}}

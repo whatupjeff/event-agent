@@ -1,0 +1,2 @@
+{"rsvp": {"Name": "{name}", "Email": "{email}", "Register": "Request to join"},
+ "cancel": {"Email": "{email}", "Action": "Cancel registration"}}

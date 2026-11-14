@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+httpx
+pytest
+cognee==1.6.8
