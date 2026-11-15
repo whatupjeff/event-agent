@@ -20,6 +20,18 @@ def _api_key() -> str:
     return key
 
 
+def _check_status(r: httpx.Response) -> None:
+    if r.status_code >= 400:
+        try:
+            body = r.json()
+            msg = body.get("message") or body.get("error", {}).get("message") or r.text
+        except Exception:
+            msg = r.text
+        if 400 <= r.status_code < 500:
+            raise ValueError(f"Boat API ({r.status_code}): {msg}")
+        r.raise_for_status()
+
+
 class BoatVMClient:
     """Async client for Boat.dev Ubuntu browser VMs."""
 
@@ -52,7 +64,7 @@ class BoatVMClient:
         """Provision a Boat sandbox and wait until it is ready."""
         async with self._client() as c:
             r = await c.post("/sandboxes", json={"ttlSeconds": ttl_seconds})
-            r.raise_for_status()
+            _check_status(r)
             data = r.json()
             sb = data.get("sandbox", data)
             sandbox_id = sb.get("id") or data.get("id")
@@ -67,7 +79,7 @@ class BoatVMClient:
         deadline = time.monotonic() + self.ready_timeout_s
         while time.monotonic() < deadline:
             r = await c.get(f"/sandboxes/{sandbox_id}")
-            r.raise_for_status()
+            _check_status(r)
             data = r.json()
             sb = data.get("sandbox", data)
             state = (sb.get("state") or sb.get("status") or "").lower()
@@ -83,7 +95,7 @@ class BoatVMClient:
         suffix = "?vnc=1" if vnc else ""
         async with self._client() as c:
             r = await c.post(f"/sandboxes/{sandbox_id}/desktop{suffix}")
-            r.raise_for_status()
+            _check_status(r)
             data = r.json()
             return (
                 data.get("viewer_url")
@@ -96,7 +108,7 @@ class BoatVMClient:
         """Run a shell command inside the sandbox and raise on non-zero exit."""
         async with self._client() as c:
             r = await c.post(f"/sandboxes/{sandbox_id}/commands", json={"command": command})
-            r.raise_for_status()
+            _check_status(r)
             data = r.json()
             res = data.get("result", data)
             exit_code = res.get("exit_code", res.get("exitCode", 0))

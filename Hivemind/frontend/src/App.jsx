@@ -157,17 +157,21 @@ function Ask({ onPrepare, onError, approvals }) {
             <div className="bubble agent muted">Memory, Scout and Ranker are on it…</div>
           ) : (
             <div className="bubble agent">
-              {t.results.slice(0, 6).map((r) => (
+              {t.results.slice(0, 6).map((r) => {
+                const pageUrl = r.event.urls?.[r.event.platforms?.[0]] || Object.values(r.event.urls || {}).find(Boolean)
+                return (
                 <div key={r.event.id}>
                   <EventCard e={r.event}>
                     <div className="score"><b>{r.score}</b><div className="bar"><i style={{ width: `${r.score}%` }} /></div></div>
                     <button className="primary" disabled={asked.has(r.event.id)} onClick={() => onPrepare(r.event.id, 'rsvp')}>
                       {asked.has(r.event.id) ? 'Prepared' : 'RSVP'}
                     </button>
+                    {pageUrl && <a href={pageUrl} target="_blank" rel="noreferrer" className="small">Event page ↗</a>}
                   </EventCard>
                   <div className="reason">{r.reason}</div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

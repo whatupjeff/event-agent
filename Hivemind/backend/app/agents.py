@@ -3,8 +3,11 @@ import hashlib
 import math
 import os
 import re
+import time
 from collections import Counter
 from datetime import datetime
+
+import httpx
 
 from . import boat_vm, cognee_store, sie
 from .fixtures import MODE, NOW, afixture, fixture
@@ -47,6 +50,49 @@ class Scout(Agent):
         super().__init__(bus)
         self.overrides: dict[str, str] = {}  # event id -> status after an approved RSVP/cancel (local only)
         self._merged = 0
+        self._live_luma: list[Event] = []
+        self._live_luma_ts: float = 0.0
+
+    async def _fetch_luma_discovery(self) -> list[Event]:
+        if self._live_luma and (time.time() - self._live_luma_ts) < 60:
+            return self._live_luma
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.get("https://api.luma.com/discover/get-paginated-events", params={"pagination_limit": 25})
+            r.raise_for_status()
+            entries = r.json().get("entries", [])
+        events: list[Event] = []
+        for entry in entries:
+            ev = entry.get("event") or {}
+            eid = ev.get("api_id")
+            if not eid or not ev.get("start_at") or not ev.get("end_at"):
+                continue
+            geo = ev.get("geo_address_info") or {}
+            coord = ev.get("coordinate") or geo.get("place_coordinate") or {}
+            slug = ev.get("url") or eid
+            url = slug if slug.startswith("http") else f"https://lu.ma/{slug}"
+            tags = [t.get("name", "").lower() for t in (entry.get("tags") or []) if t.get("name")]
+            if not tags and ev.get("event_type"):
+                tags = [str(ev["event_type"]).lower()]
+            events.append(Event(
+                id=f"luma:{eid}",
+                title=ev.get("name", "Untitled Event"),
+                start=ev["start_at"],
+                end=ev["end_at"],
+                venue=geo.get("short_address") or geo.get("address") or ("Online" if ev.get("location_type") == "online" else "TBA"),
+                city=geo.get("city") or ("Online" if ev.get("location_type") == "online" else ""),
+                lat=coord.get("latitude"),
+                lon=coord.get("longitude"),
+                description=geo.get("description") or "",
+                tags=tags,
+                status="none",
+                platforms=["luma"],
+                urls={"luma": url},
+                source_ids=[f"luma:{eid}"],
+            ))
+        self._live_luma = events
+        self._live_luma_ts = time.time()
+        self.bus.trace.emit(self.name, "luma", "discover", f"Fetched {len(events)} live events from Luma Discovery API")
+        return events
 
     def _all(self) -> list[Event]:
         out = []
@@ -57,7 +103,8 @@ class Scout(Agent):
         if len(out) - len(merged) != self._merged:  # report merges once, not on every call
             self._merged = len(out) - len(merged)
             self.bus.trace.emit(self.name, self.name, "merge", f"Merged {len(out) - len(merged)} duplicate listings across platforms")
-        return [e.model_copy(update={"status": self.overrides[e.id]}) if e.id in self.overrides else e for e in merged]
+        all_evs = merged + [e for e in self._live_luma]
+        return [e.model_copy(update={"status": self.overrides[e.id]}) if e.id in self.overrides else e for e in all_evs]
 
     async def my_events(self):
         return dump(e for e in self._all() if e.start >= NOW and e.status in ("going", "waitlist"))
@@ -66,6 +113,13 @@ class Scout(Agent):
         return dump(e for e in self._all() if e.start < NOW and e.status != "none")
 
     async def catalog(self):
+        if MODE != "fixtures":
+            live = await self._fetch_luma_discovery()
+            return dump(
+                e.model_copy(update={"status": self.overrides[e.id]}) if e.id in self.overrides else e
+                for e in live
+                if self.overrides.get(e.id, e.status) == "none"
+            )
         return dump(e for e in self._all() if e.start >= NOW and e.status == "none")
 
     async def get(self, event_id):

@@ -3,6 +3,7 @@ import os
 import secrets
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 from . import cognee_store
 from .agents import ALL
 from .bus import Bus, Trace
-from .fixtures import MODE
+from .fixtures import MODE, fixture
 from .models import Action
 
 O = "orchestrator"
@@ -200,6 +201,65 @@ async def vm_preview(sandbox_id: str):
       <table style="width:100%;border-collapse:collapse">{rows}</table>
       <div style="margin-top:14px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;color:#1e40af;font-size:12px">
         Registrar pre-filled these fields in Chrome. Click <b>Approve</b> in Hivemind to submit.
+      </div>
+    </div>
+  </div>
+</body></html>"""
+
+
+@app.get("/api/events/{event_id:path}/page", response_class=HTMLResponse)
+async def event_page(event_id: str, platform: str | None = None):
+    try:
+        e = await bus.ask(O, "scout", "get", event_id=event_id)
+    except ValueError:
+        raise HTTPException(404, "Event not found")
+    platforms = e.get("platforms") or ["luma"]
+    plat = platform if platform in platforms else platforms[0]
+    listing_url = (e.get("urls") or {}).get(plat, "")
+    status = e.get("status", "none")
+    status_label = "open" if status == "none" else status
+
+    start_dt = datetime.fromisoformat(e["start"])
+    end_dt = datetime.fromisoformat(e["end"])
+    when = f"{start_dt:%a %b} {start_dt.day}, {start_dt:%Y} · {start_dt:%I:%M %p} – {end_dt:%I:%M %p}".replace(" 0", " ")
+
+    user = fixture("user")
+    form = fixture(f"forms/{plat}").get("rsvp", {})
+    fields = {k: v.format_map(user) for k, v in form.items()}
+    form_rows = "".join(
+        f"<tr><td style='color:#6b7280;padding:6px 12px 6px 0'>{html.escape(str(k))}</td>"
+        f"<td style='color:#111827;font-weight:500'>{html.escape(str(v))}</td></tr>"
+        for k, v in fields.items()
+    )
+    tags_html = "".join(
+        f"<span style='background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:99px;font-size:12px'>#{html.escape(t)}</span>"
+        for t in e.get("tags", [])
+    )
+    plat_colors = {"luma": "#ec4899", "meetup": "#ef4444", "eventbrite": "#f97316"}
+    accent = plat_colors.get(plat, "#6366f1")
+
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{html.escape(e['title'])} · {html.escape(plat)}</title></head>
+<body style="margin:0;background:#f8fafc;color:#0f172a;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;padding:32px 16px">
+  <div style="max-width:640px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(15,23,42,.06)">
+    <div style="padding:14px 24px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;background:#fcfcfd">
+      <span style="background:{accent};color:#fff;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;text-transform:capitalize">{html.escape(plat)}</span>
+      <span style="color:#64748b;font-family:monospace;font-size:12px">{html.escape(listing_url)}</span>
+    </div>
+    <div style="padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <h1 style="margin:0;font-size:22px;line-height:1.25">{html.escape(e['title'])}</h1>
+        <span style="background:#eef2ff;color:#4338ca;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap">{html.escape(status_label)}</span>
+      </div>
+      <div style="margin-top:14px;color:#334155">
+        <div><b>When:</b> {html.escape(when)}</div>
+        <div><b>Where:</b> {html.escape(e['venue'])} · {html.escape(e['city'])}</div>
+      </div>
+      <p style="margin:16px 0;color:#475569">{html.escape(e.get('description', ''))}</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px">{tags_html}</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px">
+        <div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;font-weight:700;margin-bottom:8px">{html.escape(plat)} RSVP Form Preview</div>
+        <table style="width:100%;border-collapse:collapse">{form_rows}</table>
       </div>
     </div>
   </div>
