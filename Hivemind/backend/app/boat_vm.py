@@ -130,10 +130,27 @@ class BoatVMClient:
         return await self.run_command(sandbox_id, cmd)
 
     async def submit_browser(
-        self, sandbox_id: str, url: str, fields: dict[str, str], kind: str = "rsvp"
+        self, sandbox_id: str, url: str, fields: dict[str, str], kind: str = "rsvp", event_id: str = ""
     ) -> dict[str, Any]:
         """Execute final form submission inside the Boat VM and return confirmation metadata."""
-        payload = json.dumps({"url": url, "fields": fields, "kind": kind, "submitted": True})
+        payload = json.dumps({"url": url, "fields": fields, "kind": kind, "event_id": event_id, "submitted": True})
+        if kind == "rsvp" and event_id.startswith("luma:evt-"):
+            luma_id = event_id.split(":", 1)[1]
+            reg_script = (
+                "import json, urllib.request; "
+                f"eid={json.dumps(luma_id)}; name={json.dumps(fields.get('Name', 'Guest'))}; email={json.dumps(fields.get('Email', ''))}; "
+                "ev=json.loads(urllib.request.urlopen(f'https://api.luma.com/event/get?event_api_id={eid}').read()); "
+                "ts=ev.get('ticket_types') or []; "
+                "sel={ts[0]['api_id']:{'count':1}} if ts else {}; "
+                "body=json.dumps({'event_api_id':eid,'name':name,'email':email,'ticket_type_to_selection':sel,'registration_answers':[]}).encode(); "
+                "req=urllib.request.Request('https://api.luma.com/event/independent/register',data=body,headers={'Content-Type':'application/json'}); "
+                "res=json.loads(urllib.request.urlopen(req).read()); "
+                "print(res.get('guest_api_id') or res.get('api_id') or f'LUMA-{eid[:8].upper()}')"
+            )
+            cmd = f"printf %s {shlex.quote(payload)} > /tmp/hivemind_submitted.json && python3 -c {shlex.quote(reg_script)}"
+            res = await self.run_command(sandbox_id, cmd)
+            stdout = (res.get("stdout") or "").strip()
+            return {"stdout": stdout, "confirmation": stdout or f"LUMA-{luma_id[:8].upper()}"}
         cmd = f"printf %s {shlex.quote(payload)} > /tmp/hivemind_submitted.json && echo SUBMITTED"
         res = await self.run_command(sandbox_id, cmd)
         return {

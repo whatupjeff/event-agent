@@ -391,31 +391,6 @@ class Registrar(Agent):
         return {"kind": kind, "event_id": e.id, "event_title": e.title, "platform": platform,
                 "url": event_url, "fields": fields, "warnings": warnings, "browser": browser}
 
-    async def _register_luma(self, event_api_id: str, name: str, email: str) -> str:
-        async with httpx.AsyncClient(timeout=15.0) as c:
-            ev_r = await c.get("https://api.luma.com/event/get", params={"event_api_id": event_api_id})
-            ev_data = ev_r.json() if ev_r.status_code == 200 else {}
-            tickets = ev_data.get("ticket_types") or []
-            ticket_sel = {tickets[0]["api_id"]: {"count": 1}} if tickets else {}
-            r = await c.post(
-                "https://api.luma.com/event/independent/register",
-                json={
-                    "event_api_id": event_api_id,
-                    "name": name,
-                    "email": email,
-                    "ticket_type_to_selection": ticket_sel,
-                    "registration_answers": [],
-                },
-            )
-            if r.status_code >= 400:
-                try:
-                    msg = r.json().get("message") or r.text
-                except Exception:
-                    msg = r.text
-                raise RuntimeError(f"Luma registration failed ({r.status_code}): {msg}")
-            data = r.json()
-            return data.get("guest_api_id") or data.get("api_id") or f"LUMA-{event_api_id[:8].upper()}"
-
     async def submit(self, action):
         if os.getenv("REGISTRAR_SUBMIT", "simulated") == "live":
             browser = action.get("browser") or {}
@@ -423,25 +398,14 @@ class Registrar(Agent):
             if not sandbox_id:
                 raise ValueError("no active browser VM session for this action")
             client = boat_vm.get_client()
-            luma_conf = None
             try:
                 sub = await client.submit_browser(
                     sandbox_id,
                     action.get("url", ""),
                     action.get("fields", {}),
                     kind=action["kind"],
+                    event_id=action.get("event_id", ""),
                 )
-                if (
-                    action.get("platform") == "luma"
-                    and action.get("kind") == "rsvp"
-                    and action.get("event_id", "").startswith("luma:evt-")
-                ):
-                    fields = action.get("fields") or {}
-                    luma_conf = await self._register_luma(
-                        action["event_id"].split(":", 1)[1],
-                        fields.get("Name", "Guest"),
-                        fields.get("Email", ""),
-                    )
             finally:
                 await client.stop_sandbox(sandbox_id)
             await self.bus.ask(
@@ -455,7 +419,7 @@ class Registrar(Agent):
                 "ok": True,
                 "mode": "live",
                 "sandbox_id": sandbox_id,
-                "confirmation": luma_conf or sub.get("confirmation", f"BOAT-{sandbox_id[:8].upper()}"),
+                "confirmation": sub.get("confirmation", f"BOAT-{sandbox_id[:8].upper()}"),
             }
         await self.bus.ask(self.name, "scout", "set_status", event_id=action["event_id"],
                            status="going" if action["kind"] == "rsvp" else "none")
