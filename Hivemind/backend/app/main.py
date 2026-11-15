@@ -100,6 +100,8 @@ async def add_note(req: NoteReq):
 class ActionReq(BaseModel):
     event_id: str
     kind: Literal["rsvp", "cancel"]
+    name: str | None = None
+    email: str | None = None
 
 
 @app.exception_handler(ValueError)
@@ -110,7 +112,8 @@ async def bad_request(_, exc: ValueError):  # agents raise ValueError for things
 @app.post("/api/actions")
 async def prepare(req: ActionReq):
     """Registrar fills the form; we pause and hand the user a one-time token. Nothing is submitted here."""
-    a = Action(**await bus.ask(O, "registrar", "prepare", event_id=req.event_id, kind=req.kind),
+    a = Action(**await bus.ask(O, "registrar", "prepare", event_id=req.event_id, kind=req.kind,
+                               name=req.name, email=req.email),
                expires_at=time.time() + APPROVAL_TTL_S)
     actions[a.id] = a
     tokens[a.id] = token = secrets.token_urlsafe(16)

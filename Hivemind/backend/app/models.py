@@ -29,6 +29,7 @@ class Event(BaseModel):
     platforms: list[Platform]
     urls: dict[str, str] = {}  # platform -> event page
     source_ids: list[str] = []  # every platform listing merged into this one
+    attendees: int | None = None
 
 
 class Profile(BaseModel):

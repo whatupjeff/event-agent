@@ -15,7 +15,7 @@ export const api = {
   ask: (prompt) => call('/ask', { method: 'POST', body: { prompt } }),
   profile: () => call('/profile'),
   addNote: (text) => call('/profile/notes', { method: 'POST', body: { text } }),
-  prepare: (event_id, kind) => call('/actions', { method: 'POST', body: { event_id, kind } }),
+  prepare: (event_id, kind, user = {}) => call('/actions', { method: 'POST', body: { event_id, kind, ...user } }),
   approve: (id, token) => call(`/actions/${id}/approve`, { method: 'POST', body: { token } }),
   reject: (id) => call(`/actions/${id}/reject`, { method: 'POST' }),
 }

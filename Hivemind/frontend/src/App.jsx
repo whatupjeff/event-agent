@@ -11,6 +11,11 @@ export default function App() {
   const [approvals, setApprovals] = useState([]) // [{action, token}] tokens live only in this tab's memory
   const [version, setVersion] = useState(0) // bump to reload data after an approved action
   const [error, setError] = useState('')
+  const [userEmail, setUserEmail] = useState(() => localStorage.getItem('ea_email') || '')
+  const [userName, setUserName] = useState(() => localStorage.getItem('ea_name') || '')
+  const [needEmail, setNeedEmail] = useState(null) // {eventId, kind} when RSVP clicked without email
+  const [emailInput, setEmailInput] = useState('')
+  const [nameInput, setNameInput] = useState('')
 
   useEffect(() => { api.health().then(setHealth).catch((e) => setError(e.message)) }, [])
   useEffect(() => {
@@ -22,10 +27,32 @@ export default function App() {
   const run = (fn) => (...args) => fn(...args).then(() => setError('')).catch((e) => setError(e.message))
   const update = (a) => setApprovals((xs) => xs.map((x) => (x.action.id === a.id ? { ...x, action: a } : x)))
 
-  const prepare = run(async (eventId, kind) => {
-    const item = await api.prepare(eventId, kind)
+  const prepare = run(async (eventId, kind, overrideUser) => {
+    const email = overrideUser?.email ?? userEmail
+    const name = overrideUser?.name ?? userName
+    if (kind === 'rsvp' && !email.trim()) {
+      setEmailInput(userEmail)
+      setNameInput(userName)
+      setNeedEmail({ eventId, kind })
+      return
+    }
+    const item = await api.prepare(eventId, kind, { email, name })
     setApprovals((xs) => [item, ...xs])
   })
+
+  const saveEmailAndContinue = async (e) => {
+    e.preventDefault()
+    if (!emailInput.trim()) return
+    const email = emailInput.trim()
+    const name = nameInput.trim()
+    localStorage.setItem('ea_email', email)
+    if (name) localStorage.setItem('ea_name', name)
+    setUserEmail(email)
+    setUserName(name)
+    const pendingReq = needEmail
+    setNeedEmail(null)
+    if (pendingReq) await prepare(pendingReq.eventId, pendingReq.kind, { email, name })
+  }
   const approve = run(async (item) => {
     update(await api.approve(item.action.id, item.token))
     setVersion((v) => v + 1)
@@ -52,6 +79,18 @@ export default function App() {
 
       <main className={tab === 'ask' ? 'with-side' : ''}>
         <section>
+          {needEmail && (
+            <form className="card" onSubmit={saveEmailAndContinue} style={{ marginBottom: 12 }}>
+              <b>Enter your details for this RSVP</b>
+              <p className="muted small" style={{ margin: '4px 0 8px' }}>Used to fill the registration form instead of demo@example.com.</p>
+              <div className="row" style={{ gap: 8 }}>
+                <input type="text" placeholder="Your name" value={nameInput} onChange={(e) => setNameInput(e.target.value)} />
+                <input type="email" required placeholder="you@email.com" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} autoFocus />
+                <button type="submit" className="primary">Continue</button>
+                <button type="button" onClick={() => setNeedEmail(null)}>Cancel</button>
+              </div>
+            </form>
+          )}
           {approvals.length > 0 && (
             <div className="approvals">
               {approvals.slice(0, 3).map((x) => <ApprovalCard key={x.action.id} item={x} onApprove={approve} onReject={reject} />)}

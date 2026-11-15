@@ -25,7 +25,10 @@ export function EventCard({ e, children }) {
         <div className="title">
           {e.title} {e.status !== 'none' && <span className={`chip s-${e.status}`}>{e.status}</span>}
         </div>
-        <div className="muted">{e.venue} · {e.city}</div>
+        <div className="muted">
+          {e.venue} · {e.city}
+          {e.attendees != null && <span> · {e.attendees} going</span>}
+        </div>
         <div className="row"><Platforms e={e} />{e.tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>
       </div>
       {children && <div className="side">{children}</div>}
